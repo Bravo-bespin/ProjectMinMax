@@ -1,7 +1,19 @@
-import Bungo from 'bungie-auth/electron';
+import { getMemberships, getProfile } from "./api.js";
 
-const bungo = new Bungo({ /*.. config ..*/ });
+async function loadDestinyProfile() {
+  try {
+    const memberships = await getMemberships();
 
-bungo.token(function token(err, data) {
-  console.log(data.accessToken.value); // CJ098da098df...
-});
+    const destinyMembership = memberships.destinyMemberships[0];
+    const profile = await getProfile(
+      destinyMembership.membershipType,
+      destinyMembership.membershipId
+    );
+
+    console.log(profile);
+  } catch (error) {
+    console.error("Could not load Bungie data:", error);
+  }
+}
+
+loadDestinyProfile();

@@ -1,38 +1,49 @@
-import Bungo from 'bungie-auth/electron';
+import Bungo from "bungie-auth/electron";
 
 const bungie = new Bungo({
-  key: 'f186a595620345c4b6c9a423521e3cd2',
-  url: 'https://www.bungie.net/en/OAuth/Authorize'
+  key: process.env.BUNGIE_API_KEY,
+  url: "https://www.bungie.net/en/OAuth/Authorize",
 });
 
-bungie.token(function (err, paylaod) {
-  if (err) throw err;
+function getAccessToken() {
+  return new Promise((resolve, reject) => {
+    bungie.token((err, payload) => {
+      if (err) return reject(err);
 
-  const token = payload.accessToken.value;
-  const authorization = `Bearer ${token}`;
-});
+      resolve(payload.accessToken.value);
+    });
+  });
+}
 
-bungie.token(function (err, payload) {
+async function bungieGet(path) {
+  const token = await getAccessToken();
 
-});
+  const response = await fetch(`https://www.bungie.net/Platform${path}`, {
+    headers: {
+      "X-API-Key": process.env.BUNGIE_API_KEY,
+      Authorization: `Bearer ${token}`,
+    },
+  });
 
-bungie.request(function (err, payload) {
+  const body = await response.json();
 
-});
+  if (!response.ok || body.ErrorCode !== 1) {
+    throw new Error(body.Message || "Bungie API request failed");
+  }
 
-bungie.refresh(token, function (err, payload) {
+  return body.Response;
+}
 
-});
+export function getCurrentUser() {
+  return bungieGet("/User/GetCurrentBungieNetUser/");
+}
 
-bungie.refresh(function (err, payload) {
+export function getMemberships() {
+  return bungieGet("/User/GetMembershipsForCurrentUser/");
+}
 
-});
-
-const data = bungie.payload();
-
-bungie.alive(bungie.accessToken) // 189
-
-bungie.expired(bungie.accessToken) // false
-
-const fn = bungie.capture(callback);
-bungie.send('GetAccessTokenFromRefreshToken', { refreshToken: token }, fn);
+export function getProfile(membershipType, membershipId) {
+  return bungieGet(
+    `/Destiny2/${membershipType}/Profile/${membershipId}/?components=200`
+  );
+}
