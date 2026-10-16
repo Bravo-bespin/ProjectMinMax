@@ -1,4 +1,4 @@
-import Bungo from "bungie-auth/electron";
+import Bungo from "bungie-auth/electron/index.js";
 
 const bungie = new Bungo({
   key: process.env.BUNGIE_API_KEY,
