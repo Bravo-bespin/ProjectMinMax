@@ -1,10 +1,14 @@
 {
+  "name": "project-minmax",
+  "productName": "Project MinMax",
+  "private": true,
   "type": "module",
   "scripts": {
-    "start": "electron app.js"
-  },
-  "dependencies": {
-    "bungie-auth": "^1.0.1"
+    "start": "electron app.js",
+    "check": "node --check app.js && node --check api.js && node --check overlay.js && node --check double-tap.js && node --check preload.cjs && node --check renderer/app.js && node --check gear-details.js && node --check transfers.js",
+    "test": "node --test",
+    "test:overlay": "electron scripts/overlay-smoke.js",
+    "test:inventory": "electron scripts/inventory-smoke.js"
   },
   "devDependencies": {
     "electron": "^44.7.2"
@@ -14,7 +18,14 @@
     "productName": "Project MinMax",
     "mac": {
       "category": "public.app-category.utilities",
-      "target": ["dmg", "zip"]
+      "target": [
+        "dmg",
+        "zip"
+      ]
     }
+  },
+  "dependencies": {
+    "electron-overlay-window": "^4.1.0",
+    "uiohook-napi": "^1.5.5"
   }
 }
