@@ -1,9 +1,10 @@
+import { profileWindowChrome } from '../window-chrome.js';
 import { app, BrowserWindow } from 'electron';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { configureOverlay } from '../overlay.js';
 app.whenReady().then(async () => {
-const window = new BrowserWindow({ show: false, frame: false, transparent: true,
+const window = new BrowserWindow({ show: false, ...profileWindowChrome(), transparent: true,
   webPreferences: { preload: fileURLToPath(new URL('../preload.cjs', import.meta.url)), sandbox: true, contextIsolation: true, nodeIntegration: false } });
 const overlay = await configureOverlay(window);
 let html = readFileSync(new URL('../renderer/index.html', import.meta.url), 'utf8')

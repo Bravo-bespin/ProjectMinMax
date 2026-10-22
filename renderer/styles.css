@@ -80,7 +80,7 @@ main {
 .gear-item:hover {
   border-color:#8baeff;
   }
-.gear-item img {
+.gear-item > img {
   width:52px;
   height:52px;
   background:#263650;
@@ -131,6 +131,13 @@ main {
 .item-power { font-size: 34px; font-weight: 700; line-height: 1; letter-spacing: -1px; }
 .ammo { font-size: 12px; text-transform: uppercase; }
 .damage { font-size: 11px; color: #d8d5dc; }
+.ammo, .damage { display: inline-flex; align-items: center; gap: 4px; }
+.preview .ammo-icon, .preview .damage-icon { display: block; height: 16px; flex-shrink: 0; object-fit: contain; background: transparent; border: 0; }
+.preview .damage-icon { width: 16px; }
+.preview .ammo-icon { width: 22px; }
+.ammo-primary { color: #f1f1f1; }
+.ammo-special { color: #7bd896; }
+.ammo-heavy { color: #bb8ee8; }
 .damage-arc { color: #8fdae8; }
 .damage-solar { color: #f3ac76; }
 .damage-void { color: #bb99df; }
@@ -244,3 +251,64 @@ dialog select { width: 100%; }
   .characters { flex-wrap: wrap; }
   .character { flex: 1 1 40%; }
 }
+
+.load-more { display: block; margin: 22px auto; padding: 10px 20px; border: 1px solid #617493; border-radius: 4px; color: #e9eef9; background: #263650; cursor: pointer; }
+.load-more[hidden] { display: none; }
+.preview-loading { padding: 8px 11px; }
+
+.comparison-values { min-width: 0; }
+.gear-item .expected-perks { display: block; color: #b2a8bf; font-size: 11px; font-weight: normal; margin-top: 3px; line-height: 1.35; }
+.item-comparison .slot { padding: 6px 0; }
+
+.item-state-labels { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 8px; font-size: 11px; }
+.gear-tier-label { padding: 2px 6px; border: 1px solid #ffffff70; color: #fff; }
+.masterwork-label, .enhanced-label, .enhanced-trait-marker { color: #f1d47d; }
+.crafted-label { color: #f0a18c; }
+.enhanced-trait-marker { margin-left: auto; font-size: 10px; white-space: nowrap; }
+.gear-item .preview .trait-enhanced .perk-icon { outline: 1px solid #d9ba57; border-radius: 50%; background: #d9ba571a; }
+.masterwork-stat { border-top: 1px solid #ffffff25; color: #f1d47d; }
+.gear-item.equipped { border-color: #8baeff; box-shadow: inset 0 0 0 1px #8baeff22; }
+.gear-item.masterworked { border-color: #e6c761; box-shadow: 0 0 9px #e6c76135, inset 0 0 0 1px #e6c76166; }
+.gear-tier-badge { position: absolute; right: 4px; top: 4px; color: #fff; background: #17151cdd; border: 1px solid #ffffff55; padding: 1px 3px; font-size: 10px; font-weight: 700; }
+.masterwork-badge { position: absolute; left: 6px; bottom: 3px; color: #f1d47d; font-size: 11px; text-shadow: 0 1px 3px #000; }
+
+/* Leave a draggable title-bar strip for macOS's native traffic-light controls. */
+.platform-mac header { padding-top: 56px; }
+.platform-mac #close-app { display: none; }
+
+.aegis-rating { padding: 2px 6px; border: 1px solid currentColor; font-weight: 700; }
+.aegis-rating[data-rating="S"] { color: #ffe18b; background: #ffe18b15; }
+.aegis-rating[data-rating="A"] { color: #92e6a7; }
+.aegis-rating[data-rating="B"] { color: #8fc7ff; }
+.aegis-rating[data-rating="C"] { color: #d2afff; }
+.aegis-rating[data-rating="D"] { color: #c4b8aa; }
+.aegis-rating[data-rating="F"] { color: #f0a0a0; }
+.stat-track { display: flex; overflow: hidden; }
+.stat-fill, .stat-masterwork-fill, .stat-tier-fill { flex-shrink: 0; height: 100%; }
+.stat-masterwork-fill { background: #d7ad42; }
+.stat-tier-fill { background: #ffe18b; }
+.gold-stat { color: #ffe18b; }
+
+.native-titlebar { display: flex; align-items: center; justify-content: center; height: 44px; background: #000; -webkit-app-region: drag; }
+.native-titlebar h1 { font-size: 13px; font-weight: 500; color: #d8d8dc; margin: 0 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toolbar { justify-content: flex-end; }
+.platform-mac .native-titlebar {
+  display: flex;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 44px;
+  z-index: 1000;
+  background: #000;
+  border-bottom: 1px solid #ffffff18;
+  -webkit-app-region: drag;
+}
+.platform-mac .preview { max-height: calc(100vh - 68px); }
+
+.gear-item[draggable="true"] { cursor: grab; }
+.gear-item.dragging { opacity: .45; }
+.character.drop-available { border-color: #8baeff; outline: 1px dashed #8baeff; }
+.character.drop-hover { background: #304568; outline: 2px solid #a8c4ff; }
+.transferring-drag .preview { display: none; }
+.transfer-busy .gear-item[draggable="true"] { cursor: progress; }

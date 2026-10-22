@@ -6,16 +6,14 @@
     <link rel="stylesheet" href="./styles.css">
   </head>
   <body>
+    <div class="native-titlebar"><h1>Project MinMax</h1></div>
     <header>
       <div class="toolbar">
-        <h1>Project MinMax</h1>
         <div class="window-actions">
           <button id="clear-overlay" type="button">Clear overlay · M M to restore</button>
           <button id="close-app" type="button" aria-label="Close Project MinMax">Close</button>
         </div>
       </div>
-      <p id="overlay-status" role="status"></p>
-      <p>Choose a Guardian or the Vault. Hover to inspect gear, or use ↗ to transfer an unequipped item.</p>
     </header>
     <main>
       <p class="empty" id="last-refreshed">Last refreshed: __REFRESH_TIME__</p>
@@ -23,17 +21,6 @@
       <p id="inventory-message" role="status"></p>
       <section id="details"><p class="empty">Choose a character above.</p></section>
     </main>
-    <dialog id="transfer-dialog" aria-labelledby="transfer-title">
-      <h2 id="transfer-title">Transfer item</h2>
-      <p id="transfer-name"></p>
-      <label for="transfer-destination">Destination</label>
-      <select id="transfer-destination"></select>
-      <p id="transfer-message" role="status"></p>
-      <div class="dialog-actions">
-        <button id="transfer-cancel" type="button">Cancel</button>
-        <button id="transfer-submit" type="button">Transfer</button>
-      </div>
-    </dialog>
     <script id="profile-data" type="application/json">__PROFILE_DATA__</script>
     <script src="./app.js"></script>
   </body>

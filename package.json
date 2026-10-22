@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "start": "electron app.js",
-    "check": "node --check app.js && node --check api.js && node --check overlay.js && node --check double-tap.js && node --check preload.cjs && node --check renderer/app.js && node --check gear-details.js && node --check transfers.js",
+    "check": "node --check app.js && node --check api.js && node --check overlay.js && node --check double-tap.js && node --check preload.cjs && node --check renderer/app.js && node --check gear-details.js && node --check transfers.js && node --check definition-store.js && node --check inventory-loader.js && node --check weapon-comparison.js && node --check aegis-source.js && node --check scripts/check-mint-aegis.js && node --check overlay-window-policy.js && node --check scripts/overlay-lifecycle-smoke.js && node --check window-chrome.js && node --check weapon-stats.js",
     "test": "node --test",
     "test:overlay": "electron scripts/overlay-smoke.js",
-    "test:inventory": "electron scripts/inventory-smoke.js"
+    "test:inventory": "electron scripts/inventory-smoke.js",
+    "test:mint": "node scripts/check-mint-aegis.js",
+    "test:lifecycle": "electron scripts/overlay-lifecycle-smoke.js"
   },
   "devDependencies": {
     "electron": "^44.7.2"

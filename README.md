@@ -73,7 +73,7 @@ shows the Guardian’s class, power, and emblem background.
 
 Hover or keyboard-focus an item for a Destiny-style card with its rarity, power,
 instance stats, active perk icons, selected kill tracker when available, and
-Aegis comparison. Details load on demand and are cached until the next refresh.
+Aegis comparison. Details load on demand and remain cached across refreshes until the item changes.
 Stats unavailable from Bungie are omitted. The tooltip stays inside the window.
 
 Open **Vault** to search and filter stored weapons and armor. Use **↗** on an
@@ -91,3 +91,77 @@ transfer dialog. Inventory refreshes after every attempted transfer.
 `npm test` checks transfer planning, partial failures, hover-data extraction, and
 the overlay shortcut. `npm run test:inventory` tests the layout, hover positioning,
 and transfer UI with fixture data; it does not move actual account items.
+
+## Loading performance
+
+Equipped gear appears first, followed by carried gear, then the vault. Vault requests run in the
+background and interactive hover requests take priority. Public item definitions
+are cached in the app’s user-data directory for 24 hours; Aegis recommendations
+are cached for six hours and load separately from item stats and perks.
+Credentials and profile inventories are not written to these caches.
+
+Unchanged inventory refreshes preserve the current view, search field, and loaded
+vault pages. The vault renders 60 items at a time; **Load more** adds the next 60.
+Hover panels are created only when opened, and gear images load lazily.
+
+## Desktop launcher (macOS)
+
+Double-click `Project MinMax.app` on your Desktop to launch this checkout without
+Terminal. It uses the project’s existing Electron install and `.env` settings.
+Keep the project folder at its current location. If you move it, recreate the
+launcher after removing or renaming the old one:
+
+```bash
+python3 scripts/create-desktop-launcher.py
+```
+
+Launcher output is saved to `~/Library/Logs/Project MinMax/launcher.log`.
+
+## Gear tiers and hover comparisons
+
+Item tiles and hover cards show Destiny 2’s **Gear Tier 1–5** when Bungie provides
+`gearTier` for that specific item. Rarity (Legendary, Exotic, etc.) remains a
+separate label. Items without a gear tier do not receive an invented tier.
+Gold borders and a diamond mark masterworked items; enhanced traits have gold
+icon outlines and an Enhanced marker. The hover card also shows the installed
+masterwork stat plug when present.
+
+Perk 1 and Perk 2 use the equipped plug in each original socket column, including
+Bungie’s `frames` trait category. Intrinsic frames, origin traits and trackers do
+not consume those columns. Comparison rows show your installed perk plus Aegis’s
+listed alternatives. Enhanced traits match their normal names for Aegis scoring.
+
+`npm run test:mint` checks a Bungie-valid Mint Retrograde sample roll against the
+live Aegis **Other** tab, verifies that its plugs belong to the public perk pools,
+and prints the per-column matches. It uses the configured API key for public
+manifest reads; it does not read or change owned inventory. The sample is Volatile
+Launch / Appended Mag / Beacon Rounds / Chain Reaction. The Other tab is included
+in the app’s sources, and launcher `tubes` plugs count as barrel options.
+
+The panel stays visible when you click another app or the desktop, and when the
+game loses focus or closes. Only **Clear overlay** makes it invisible; double-M
+restores it. Native game-window tracking supplies geometry without controlling
+visibility. `npm run test:lifecycle` checks focus loss, safe close cleanup, and
+late native tracker callbacks after the window is destroyed.
+
+On macOS, the top-left native traffic-light buttons close, minimize, and expand
+or enter fullscreen. They hide when the overlay is cleared and return with
+double-M. The header remains draggable beneath the native window controls.
+
+Hover cards display the Aegis spreadsheet’s letter rating (S/A/B/C/D/F) near the
+weapon name, independently of the 0–4 roll-match count and Destiny gear tier.
+Archetype/intrinsic frames do not get enhanced-trait gold markers or appear as
+masterwork plugs.
+
+Weapon stat bars show verified masterwork and gear-tier contributions as two gold
+segments, with gold totals. Hover a stat for the base/masterwork/tier breakdown.
+Calculations use investment stats and Bungie’s stat-group interpolation, including
+caps and supported full-masterwork tier bonuses. If a reported total conflicts
+with the modeled contributions, or scaling data is unavailable, the app keeps
+Bungie’s total and omits an unverified gold split.
+
+The rating badge displays only its letter (S/A/B/C/D/F). On macOS, a fixed black
+title bar stays behind the native controls while the inventory scrolls; hover
+cards remain below it. Enhanced barrels, magazines, and origin traits receive
+the same gold icon outlines and Enhanced marker as enhanced gameplay traits,
+using each plug’s own metadata. Archetype frames remain unmarked.

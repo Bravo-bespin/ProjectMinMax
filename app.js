@@ -2,8 +2,14 @@ import { app, BrowserWindow, ipcMain } from "electron";
 import { readFileSync } from "node:fs";
 import { loadEnvFile } from "node:process";
 import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { createDefinitionStore } from "./definition-store.js";
+import { loadInventoryStages } from "./inventory-loader.js";
+import { normalize, parseCsv, getWeaponSlots, scoreWeapon } from "./weapon-comparison.js";
+import { AEGIS_SHEET_ID, AEGIS_SHEETS, buildRecommendationIndex } from "./aegis-source.js";
+import { profileWindowChrome } from "./window-chrome.js";
 import { configureOverlay } from "./overlay.js";
-import { getGearDetails } from "./gear-details.js";
+import { getGearDetails, getGearState } from "./gear-details.js";
 import { planTransfer, executeTransfer } from "./transfers.js";
 import { getManifestDefinition, getMemberships, getProfile, transferItem } from "./api.js";
 
@@ -17,106 +23,84 @@ const rendererTemplate = readFileSync(new URL("./renderer/index.html", import.me
 const rendererStyles = readFileSync(new URL("./renderer/styles.css", import.meta.url), "utf8");
 const rendererScript = readFileSync(new URL("./renderer/app.js", import.meta.url), "utf8");
 
-const AEGIS_SHEET_ID = "1JM-0SlxVDAi-C6rGVlLxa-J1WGewEeL8Qvq4htWZHhY";
-const AEGIS_SHEETS = [
-  "Autos", "Bows", "HCs", "Pulses", "Scouts", "Sidearms", "SMGs", "BGLs",
-  "Fusions", "Glaives", "Shotguns", "Snipers", "Rocket Sidearms", "Traces",
-  "HGLs", "LFRs", "LMGs", "Rockets", "Swords",
-];
 const CLASS_NAMES = ["Titan", "Hunter", "Warlock"];
 
 let profileWindowShown = false;
+let quitting = false;
 let aegisRecommendations;
+let readyRecommendations;
+let aegisRetryAt = 0;
 let profileWindow;
 let overlayState;
-const definitionCache = new Map();
+const definitions = createDefinitionStore({
+  file: join(app.getPath("userData"), "manifest-definitions.json"),
+  fetchDefinition: async (type, hash) => {
+    const rich = type === 'DestinyInventoryItemStatsV1';
+    const definition = await getManifestDefinition(rich ? 'DestinyInventoryItemDefinition' : type, hash);
+    if (type === 'DestinyInventoryItemDefinition' || rich) return {
+      displayProperties: definition.displayProperties, inventory: definition.inventory,
+      equippingBlock: definition.equippingBlock, itemType: definition.itemType,
+      itemTypeDisplayName: definition.itemTypeDisplayName,
+      plug: definition.plug && { plugCategoryIdentifier: definition.plug.plugCategoryIdentifier, uiPlugLabel: definition.plug.uiPlugLabel },
+      ...(rich ? { hash: definition.hash, investmentStats: definition.investmentStats, stats: { statGroupHash: definition.stats?.statGroupHash } } : {}),
+    };
+    if (type === 'DestinyStatGroupDefinition') return { scaledStats: definition.scaledStats, maximumValue: definition.maximumValue };
+    return { displayProperties: definition.displayProperties, progressDescription: definition.progressDescription };
+  },
+});
 
 function bungieImage(path) {
   return path ? `https://www.bungie.net${path}` : "";
 }
 
-function normalize(value) {
-  return String(value ?? "")
-    .replace(/^enhanced\s+/i, "")
-    .replace(/\n.*/s, "")
-    .replace(/[’']/g, "'")
-    .trim()
-    .toLowerCase();
+async function fetchAegisRecommendations() {
+  const results = await Promise.all(AEGIS_SHEETS.map(async (sheet) => {
+    const url = new URL(`https://docs.google.com/spreadsheets/d/${AEGIS_SHEET_ID}/gviz/tq`);
+    url.search = new URLSearchParams({ tqx: "out:csv", sheet });
+    const response = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+    if (!response.ok) throw new Error(`Could not load Aegis recommendations for ${sheet}`);
+    return { sheet, rows: parseCsv(await response.text()) };
+  }));
+  const recommendations = buildRecommendationIndex(results);
+  return [...recommendations];
 }
 
-function parseCsv(text) {
-  const rows = [];
-  let row = [];
-  let cell = "";
-  let quoted = false;
+const recommendationStore = createDefinitionStore({
+  file: join(app.getPath('userData'), 'aegis-recommendations.json'),
+  maxAge: 6 * 60 * 60 * 1000,
+  fetchDefinition: fetchAegisRecommendations,
+});
 
-  for (let index = 0; index < text.length; index += 1) {
-    const character = text[index];
-    if (character === '"' && quoted && text[index + 1] === '"') {
-      cell += '"';
-      index += 1;
-    } else if (character === '"') {
-      quoted = !quoted;
-    } else if (character === "," && !quoted) {
-      row.push(cell);
-      cell = "";
-    } else if ((character === "\n" || character === "\r") && !quoted) {
-      if (character === "\r" && text[index + 1] === "\n") index += 1;
-      row.push(cell);
-      if (row.some((value) => value)) rows.push(row);
-      row = [];
-      cell = "";
-    } else {
-      cell += character;
-    }
+function warmRecommendations() {
+  if (!readyRecommendations && Date.now() >= aegisRetryAt) {
+    void loadAegisRecommendations().catch((error) => console.error('Aegis comparison unavailable:', error.message));
   }
-  row.push(cell);
-  if (row.some((value) => value)) rows.push(row);
-  return rows;
-}
-
-function recommendationOptions(value) {
-  return String(value ?? "")
-    .split("\n")
-    .map(normalize)
-    .filter(Boolean);
 }
 
 async function loadAegisRecommendations() {
   if (aegisRecommendations) return aegisRecommendations;
-
   aegisRecommendations = (async () => {
-    const results = await Promise.all(AEGIS_SHEETS.map(async (sheet) => {
-      const url = new URL(`https://docs.google.com/spreadsheets/d/${AEGIS_SHEET_ID}/gviz/tq`);
-      url.search = new URLSearchParams({ tqx: "out:csv", sheet });
-      const response = await fetch(url);
-      if (!response.ok) throw new Error(`Could not load Aegis recommendations for ${sheet}`);
-      return parseCsv(await response.text());
-    }));
-    const recommendations = new Map();
-
-    for (const rows of results) {
-      const [headers = [], ...weapons] = rows;
-      const index = (name) => headers.findIndex((header) => header === name || header.endsWith(` ${name}`));
-      const nameIndex = index("Name");
-      const barrelIndex = index("Barrel");
-      const magazineIndex = index("Mag");
-      const perkOneIndex = index("Perk 1");
-      const perkTwoIndex = index("Perk 2");
-
-      for (const weapon of weapons) {
-        const name = normalize(weapon[nameIndex]);
-        if (!name) continue;
-        recommendations.set(name, {
-          barrel: recommendationOptions(weapon[barrelIndex]),
-          magazine: recommendationOptions(weapon[magazineIndex]),
-          perkOne: recommendationOptions(weapon[perkOneIndex]),
-          perkTwo: recommendationOptions(weapon[perkTwoIndex]),
-        });
-      }
+    const recommendations = new Map(await recommendationStore.get('Aegis-v4', `${AEGIS_SHEET_ID}:${AEGIS_SHEETS.join(',')}`));
+    readyRecommendations = recommendations;
+    // Resolve comparisons already viewed without fetching their stats again.
+    for (const [id, cached] of detailsCache) {
+      cached.then((details) => {
+        if (detailsCache.get(id) !== cached || !details.aegisPending) return;
+        const item = rawItems.get(id);
+        if (!item) return;
+        definitionFor('DestinyInventoryItemDefinition', item.itemHash).then((definition) => {
+          const recommendation = recommendations.get(normalize(definition.displayProperties?.name));
+          Object.assign(details, { recommendation, score: scoreWeapon(details.slots, recommendation), aegisPending: false,
+            excluded: recommendation ? '' : 'This weapon has no matching Aegis recommendation row.' });
+          if (!quitting && profileWindow && !profileWindow.isDestroyed() && !profileWindow.webContents.isDestroyed()) {
+            profileWindow.webContents.send('inventory:item-details', { id, details });
+          }
+        }).catch(() => {});
+      }).catch(() => {});
     }
     return recommendations;
   })().catch((error) => {
+    aegisRetryAt = Date.now() + 60_000;
     aegisRecommendations = undefined;
     throw error;
   });
@@ -124,59 +108,14 @@ async function loadAegisRecommendations() {
   return aegisRecommendations;
 }
 
-function getWeaponSlots(socketDefinitions) {
-  const slots = { barrel: "", magazine: "", perkOne: "", perkTwo: "" };
-  const traits = [];
-
-  for (const definition of socketDefinitions) {
-    const category = definition.plug?.plugCategoryIdentifier ?? "";
-    const name = definition.displayProperties?.name;
-    if (!name) continue;
-    if (category.includes("barrel") && !slots.barrel) slots.barrel = name;
-    if (category.includes("magazine") && !slots.magazine) slots.magazine = name;
-    if (category.includes("trait")) traits.push(name);
-  }
-
-  [slots.perkOne, slots.perkTwo] = traits;
-  return slots;
-}
-
-function scoreWeapon(slots, recommendation) {
-  if (!recommendation) return null;
-  const fields = ["barrel", "magazine", "perkOne", "perkTwo"];
-  const matches = {};
-  for (const field of fields) {
-    matches[field] = Boolean(slots[field]) && recommendation[field].includes(normalize(slots[field]));
-  }
-  return { matches, value: Object.values(matches).filter(Boolean).length, total: fields.length };
-}
-
 let currentProfile;
 let currentMembership;
 let transferBusy = false;
 let rendererLoaded = false;
+let displayedInventory;
 const rawItems = new Map();
 const detailsCache = new Map();
-let pendingDefinitions = 0;
-const definitionQueue = [];
-
-async function fetchDefinition(type, hash) {
-  if (pendingDefinitions >= 6) await new Promise((resolve) => definitionQueue.push(resolve));
-  pendingDefinitions++;
-  try { return await getManifestDefinition(type, hash); }
-  finally { pendingDefinitions--; definitionQueue.shift()?.(); }
-}
-
-function definitionFor(type, hash) {
-  const key = `${type}:${hash}`;
-  if (!definitionCache.has(key)) {
-    definitionCache.set(key, fetchDefinition(type, hash).catch((error) => {
-      definitionCache.delete(key);
-      throw error;
-    }));
-  }
-  return definitionCache.get(key);
-}
+const definitionFor = (type, hash, options) => definitions.get(type, hash, options);
 
 function indexItems(profile) {
   const indexed = new Map();
@@ -192,29 +131,44 @@ function indexItems(profile) {
 }
 
 async function detailsFor(item, profile = currentProfile) {
-  const definition = await definitionFor('DestinyInventoryItemDefinition', item.itemHash);
-  const { socketDefinitions, ...details } = await getGearDetails(item, definition, profile.itemComponents ?? {}, definitionFor);
-  const slots = getWeaponSlots(socketDefinitions);
-  const recommendations = await loadAegisRecommendations().catch((error) => {
-    console.error('Could not load Aegis recommendations:', error.message);
-    return new Map();
-  });
+  const richDefinitionFor = (type, hash) => definitionFor(type === 'DestinyInventoryItemDefinition' ? 'DestinyInventoryItemStatsV1' : type, hash);
+  const definition = await richDefinitionFor('DestinyInventoryItemDefinition', item.itemHash);
+  const { socketDefinitions, socketPlugs, ...details } = await getGearDetails(item, definition, profile.itemComponents ?? {}, richDefinitionFor);
+  const slots = getWeaponSlots(socketPlugs);
   const isWeapon = definition.itemType === 3;
   const isExotic = definition.inventory?.tierType === 6;
-  const recommendation = isWeapon && !isExotic ? recommendations.get(normalize(definition.displayProperties?.name)) : null;
+  const recommendation = isWeapon && !isExotic ? readyRecommendations?.get(normalize(definition.displayProperties?.name)) : null;
   return {
     ...details, slots, recommendation,
+    aegisPending: isWeapon && !isExotic && !readyRecommendations,
     score: isWeapon && !isExotic ? scoreWeapon(slots, recommendation) : null,
     excluded: isExotic && isWeapon ? 'Exotic weapons are excluded from Aegis comparison.'
       : !isWeapon ? 'Armor is excluded from Aegis comparison.'
-        : !recommendation ? 'This weapon has no matching Aegis recommendation row.' : '',
+        : !readyRecommendations ? 'Aegis comparison is loading separately.'
+          : !recommendation ? 'This weapon has no matching Aegis recommendation row.' : '',
   };
 }
 
 async function loadInventory(profile) {
   const indexed = indexItems(profile);
-  const gear = await Promise.all([...indexed.values()].map(async (item) => {
-    const definition = await definitionFor('DestinyInventoryItemDefinition', item.itemHash);
+  const progressive = !rendererLoaded;
+  currentProfile = profile;
+  rawItems.clear();
+  for (const [id, item] of indexed) rawItems.set(id, item);
+  // Keep cached details for unchanged instances across the 60-second refresh.
+  for (const [id, cached] of detailsCache) {
+    const item = indexed.get(id);
+    const signature = item && detailSignature(item, profile);
+    if (!item || cached.signature !== signature) detailsCache.delete(id);
+  }
+  const snapshot = (gear, vault, vaultLoading, vaultCount) => ({
+    characters: Object.entries(profile.characters?.data ?? {}).map(([id, character]) => ({
+      id, className: CLASS_NAMES[character.classType] || 'Guardian', light: character.light,
+      emblem: bungieImage(character.emblemBackgroundPath), gear: gear.filter((item) => item.source === id),
+    })), vault, vaultLoading, vaultCount, refreshedAt: new Date().toISOString(),
+  });
+  const hydrate = async (item, background) => {
+    const definition = await definitionFor('DestinyInventoryItemDefinition', item.itemHash, { background });
     if (definition.itemType !== 2 && definition.itemType !== 3) return null;
     const display = definition.displayProperties ?? {};
     return {
@@ -224,32 +178,36 @@ async function loadInventory(profile) {
       name: display.name || `Item ${item.itemHash}`, icon: bungieImage(display.icon),
       type: definition.itemType, category: definition.itemTypeDisplayName || 'Gear',
       tier: definition.inventory?.tierTypeName || '', tierType: definition.inventory?.tierType ?? 0,
-      locked: Boolean(item.state & 1),
+      ...getGearState(item, profile.itemComponents?.instances?.data?.[item.itemInstanceId], definition),
+      locked: Boolean(item.state & 1), detailVersion: detailSignature(item, profile),
       power: profile.itemComponents?.instances?.data?.[item.itemInstanceId]?.primaryStat?.value ?? null,
       slots: {}, stats: [], perks: [], score: null,
     };
-  }));
-  const items = gear.filter(Boolean);
-  const characters = Object.entries(profile.characters?.data ?? {}).map(([id, character]) => ({
-    id, className: CLASS_NAMES[character.classType] || 'Guardian', light: character.light,
-    emblem: bungieImage(character.emblemBackgroundPath),
-    gear: items.filter((item) => item.source === id),
-  }));
-  currentProfile = profile;
-  rawItems.clear();
-  for (const [id, item] of indexed) rawItems.set(id, item);
-  detailsCache.clear();
-  return { characters, vault: items.filter((item) => item.source === 'vault'), refreshedAt: new Date().toISOString() };
+  };
+  const { characterGear, vaultGear } = await loadInventoryStages([...indexed.values()], hydrate,
+    (gear, count) => progressive ? showCharacters(snapshot(gear, [], count > 0, count)) : undefined);
+  return snapshot(characterGear, vaultGear, false, vaultGear.length);
+}
+
+function detailSignature(item, profile) {
+  const components = profile.itemComponents ?? {};
+  const id = item.itemInstanceId;
+  return JSON.stringify([item.itemHash, item.state,
+    components.instances?.data?.[id], components.sockets?.data?.[id],
+    components.stats?.data?.[id], components.plugObjectives?.data?.[id]]);
 }
 
 ipcMain.handle('inventory:details', async (event, id) => {
   if (event.sender !== profileWindow?.webContents || typeof id !== 'string' || !rawItems.has(id)) throw new Error('Unknown item.');
   if (!detailsCache.has(id)) {
     const profile = currentProfile;
-    detailsCache.set(id, detailsFor(rawItems.get(id), profile).catch((error) => {
-      detailsCache.delete(id);
+    const item = rawItems.get(id);
+    const pending = detailsFor(item, profile).catch((error) => {
+      if (detailsCache.get(id) === pending) detailsCache.delete(id);
       throw error;
-    }));
+    });
+    pending.signature = detailSignature(item, profile);
+    detailsCache.set(id, pending);
   }
   return detailsCache.get(id);
 });
@@ -284,8 +242,11 @@ ipcMain.handle('inventory:transfer', async (event, request) => {
 });
 
 async function showCharacters(inventory) {
+  if (quitting) return;
+  displayedInventory = inventory;
   if (rendererLoaded && profileWindow && !profileWindow.isDestroyed()) {
     profileWindow.webContents.send("inventory:update", inventory);
+    warmRecommendations();
     return;
   }
   if (!profileWindow || profileWindow.isDestroyed()) {
@@ -293,7 +254,7 @@ async function showCharacters(inventory) {
       title: "Project MinMax",
       width: 1180,
       height: 820,
-      frame: false,
+      ...profileWindowChrome(),
       transparent: true,
       backgroundColor: "#00000000",
       alwaysOnTop: true,
@@ -306,8 +267,14 @@ async function showCharacters(inventory) {
         sandbox: true,
       },
     });
-    overlayState = await configureOverlay(profileWindow);
-    profileWindow.on("closed", () => { overlayState.dispose(); profileWindow = undefined; });
+    const currentWindow = profileWindow;
+    const currentOverlay = await configureOverlay(currentWindow);
+    overlayState = currentOverlay;
+    if (quitting || currentWindow.isDestroyed()) { currentOverlay.dispose(); return; }
+    currentWindow.once("closed", () => {
+      currentOverlay.dispose();
+      if (profileWindow === currentWindow) { profileWindow = undefined; rendererLoaded = false; }
+    });
   }
   profileWindowShown = true;
   const payload = JSON.stringify(inventory).replaceAll("<", "\\u003c");
@@ -319,13 +286,14 @@ async function showCharacters(inventory) {
     .replace('<script src="./app.js"></script>', () => `<script>${rendererScript}</script>`);
   await profileWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(page)}`);
   rendererLoaded = true;
+  warmRecommendations();
 }
 
 let refreshing = false;
 let refreshTimer;
 
 async function loadDestinyProfile() {
-  if (refreshing || transferBusy) return;
+  if (quitting || refreshing || transferBusy) return;
   refreshing = true;
   try {
     const memberships = await getMemberships();
@@ -333,10 +301,14 @@ async function loadDestinyProfile() {
       ?? memberships.destinyMemberships?.[0];
     if (!destinyMembership) throw new Error("No Destiny membership was found for this Bungie account.");
     const profile = await getProfile(destinyMembership.membershipType, destinyMembership.membershipId);
+    if (quitting) return;
     currentMembership = destinyMembership;
     await showCharacters(await loadInventory(profile));
   } catch (error) {
     console.error("Could not load Bungie data:", error);
+    if (!quitting && displayedInventory?.vaultLoading) {
+      await showCharacters({ ...displayedInventory, vaultLoading: false, vaultError: 'Vault could not load: ' + error.message });
+    }
   } finally {
     refreshing = false;
   }
@@ -344,9 +316,14 @@ async function loadDestinyProfile() {
 
 app.whenReady().then(async () => {
   await loadDestinyProfile();
-  refreshTimer = setInterval(loadDestinyProfile, 60_000);
+  if (!quitting) refreshTimer = setInterval(loadDestinyProfile, 60_000);
 });
 app.on("window-all-closed", () => {
-  if (profileWindowShown) app.quit();
+  if (profileWindowShown && !quitting) app.quit();
 });
-app.on("before-quit", () => clearInterval(refreshTimer));
+app.on("before-quit", () => { quitting = true; clearInterval(refreshTimer); overlayState?.dispose(); });
+
+app.once("before-quit", (event) => {
+  event.preventDefault();
+  Promise.allSettled([definitions.flush(), recommendationStore.flush()]).then(() => app.quit());
+});

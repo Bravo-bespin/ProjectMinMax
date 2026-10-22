@@ -29,3 +29,87 @@ test('missing stats and trackers remain absent instead of fabricated', async () 
   const result = await getGearDetails({ itemInstanceId: 'x' }, {}, {}, async () => assert.fail('No definitions needed'));
   assert.deepEqual(result.stats, []); assert.deepEqual(result.perks, []); assert.equal(result.tracker, null);
 });
+
+test('armor upgrade masterwork is omitted from both perk and masterwork rows', async () => {
+  const result = await getGearDetails({ itemInstanceId: 'armor', state: 4 }, { itemType: 2 }, {
+    sockets: { data: { armor: { sockets: [{ plugHash: 1 }, { plugHash: 2 }] } } },
+  }, async (_type, hash) => ({
+    plug: { plugCategoryIdentifier: hash === 1 ? 'masterworks.stat.armor' : 'armor.mods' },
+    displayProperties: { name: 'Upgrade Armor' },
+  }));
+  assert.equal(result.masterwork, null);
+  assert.deepEqual(result.perks, []);
+  assert.equal(result.masterworked, true);
+});
+
+test('legacy armor omits unnamed internal plugs while keeping installed armor mods', async () => {
+  const result = await getGearDetails({ itemInstanceId: 'armor' }, { itemType: 2 }, {
+    sockets: { data: { armor: { sockets: [1, 2, 3, 4, 5].map((plugHash) => ({ plugHash })) } } },
+  }, async (_type, hash) => ({
+    plug: { plugCategoryIdentifier: 'armor.mods' },
+    displayProperties: hash === 5 ? { name: 'Resilience Mod', icon: '/mod.png' }
+      : { name: [undefined, '', ' ', '\t'][hash - 1] },
+  }));
+  assert.equal(result.gearTier, null);
+  assert.deepEqual(result.perks.map((perk) => perk.name), ['Resilience Mod']);
+  assert.equal(result.socketPlugs.length, 5);
+});
+
+test('gear tier, masterwork and enhancement are separate instance states', async () => {
+  const { getGearState } = await import('../gear-details.js');
+  assert.deepEqual(getGearState({ state: 4 | 8 | 32 }, { gearTier: 5 }, { inventory: { recipeItemHash: 123 } }), { gearTier: 5, masterworked: true, crafted: true, enhanced: true });
+  assert.deepEqual(getGearState({ state: 1 }, {}), { gearTier: null, masterworked: false, crafted: false, enhanced: false });
+  for (const gearTier of [0, 6, undefined]) assert.equal(getGearState({}, { gearTier }).gearTier, null);
+});
+test('enhanced random rolls with the crafted flag are not labeled crafted', async () => {
+  const { getGearState } = await import('../gear-details.js');
+  for (const state of [8, 8 | 4, 8 | 32]) {
+    const result = getGearState({ state }, {}, { inventory: {} });
+    assert.equal(result.crafted, false);
+    assert.equal(result.enhanced, true);
+  }
+  const craftableDrop = getGearState({ state: 0 }, {}, { inventory: { recipeItemHash: 123 } });
+  assert.equal(craftableDrop.crafted, false);
+  assert.equal(craftableDrop.enhanced, false);
+  const shaped = getGearState({ state: 8 }, {}, { inventory: { recipeItemHash: 123 } });
+  assert.equal(shaped.crafted, true);
+  assert.equal(shaped.enhanced, false);
+});
+test('active enhanced gameplay traits keep physical socket indices and show their enhanced metadata', async () => {
+  const result = await getGearDetails({ itemInstanceId: 'x', state: 4 }, {}, {
+    instances: { data: { x: { gearTier: 4 } } },
+    sockets: { data: { x: { sockets: [ {}, {}, {}, { plugHash: 10, isEnabled: false }, { plugHash: 11 } ] } } },
+  }, async () => ({ plug: { plugCategoryIdentifier: 'frames' }, itemTypeDisplayName: 'Enhanced Trait', displayProperties: { name: 'Jolting Feedback', icon: '/perk.png' } }));
+  assert.equal(result.socketPlugs[0].socketIndex, 4);
+  assert.equal(result.perks[0].enhanced, true);
+  assert.equal(result.perks[0].name, 'Jolting Feedback');
+  assert.equal(result.gearTier, 4); assert.equal(result.masterworked, true);
+});
+
+test('enhanced archetype frame stays neutral and is not rendered as a masterwork entry', async () => {
+  const result = await getGearDetails({ itemInstanceId: 'x', state: 0 }, {}, {
+    sockets: { data: { x: { sockets: [{ plugHash: 10 }] } } },
+  }, async () => ({ plug: { plugCategoryIdentifier: 'intrinsics' }, itemTypeDisplayName: 'Enhanced Intrinsic', displayProperties: { name: 'Enhanced Adaptive Frame' } }));
+  assert.equal(result.perks[0].intrinsic, true);
+  assert.equal(result.perks[0].enhanced, false);
+  assert.equal(result.masterwork, null);
+  assert.equal(result.masterworked, false);
+});
+
+test('hover includes enhanced barrels, magazines and origin traits without marking a normal frame', async () => {
+  const plugs = [
+    ['intrinsics', 'Intrinsic', 'Micro-Missile Frame'],
+    ['tubes', 'Enhanced Launcher Barrel', 'Volatile Launch'],
+    ['magazines', 'Enhanced Magazine', 'Appended Mag'],
+    ['origins', 'Enhanced Origin Trait', 'Accelerated Assault'],
+  ];
+  const result = await getGearDetails({ itemInstanceId: 'x', state: 32 }, {}, {
+    sockets: { data: { x: { sockets: plugs.map((_plug, index) => ({ plugHash: index + 1 })) } } },
+  }, async (_type, hash) => {
+    const [category, type, name] = plugs[hash - 1];
+    return { plug: { plugCategoryIdentifier: category }, itemTypeDisplayName: type, displayProperties: { name } };
+  });
+  assert.deepEqual(result.perks.map(({ name, enhanced }) => [name, enhanced]), [
+    ['Micro-Missile Frame', false], ['Volatile Launch', true], ['Appended Mag', true], ['Accelerated Assault', true],
+  ]);
+});

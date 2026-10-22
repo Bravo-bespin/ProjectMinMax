@@ -101,6 +101,7 @@ async function bungieGet(path) {
     requiredEnvironment("BUNGIE_API_KEY"),
   ]);
   const response = await fetch(`${API_ROOT}${path}`, {
+    signal: AbortSignal.timeout(15_000),
     headers: { "X-API-Key": apiKey, Authorization: `Bearer ${token}` },
   });
   const body = await response.json();

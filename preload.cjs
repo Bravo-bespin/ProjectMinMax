@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('minmaxOverlay', {
+  platform: process.platform,
   onVisibility: (callback) => {
     const listener = (_event, cleared) => callback(cleared);
     ipcRenderer.on('overlay:visibility', listener);
@@ -12,6 +13,11 @@ contextBridge.exposeInMainWorld('minmaxOverlay', {
 });
 
 contextBridge.exposeInMainWorld('minmaxInventory', {
+  onDetails: (callback) => {
+    const listener = (_event, item) => callback(item);
+    ipcRenderer.on('inventory:item-details', listener);
+    return () => ipcRenderer.removeListener('inventory:item-details', listener);
+  },
   details: (id) => ipcRenderer.invoke('inventory:details', id),
   transfer: (request) => ipcRenderer.invoke('inventory:transfer', request),
   onUpdate: (callback) => {
